@@ -28,6 +28,16 @@ BASE_URL = "https://openrouter.ai/api/v1"
 MODEL_NAME = "meta-llama/llama-3-8b-instruct" # Using Llama 3 8B
 FAISS_INDEX_PATH = "faiss_index" # Path to save/load the vector store
 
+# --- Session Memory and Bot Output Helper ---
+session_memory = {"name": None, "symptom_log": []}
+
+def bot_print(message: str) -> None:
+    """Prints a message from the bot, addressing the user by name if known."""
+    if session_memory["name"]:
+        print(f"Bot: {session_memory['name']}, {message}")
+    else:
+        print(f"Bot: {message}")
+
 # === Document Loading ===
 def load_documents_from_folder(folder_path):
     """
@@ -74,17 +84,18 @@ def load_quiz(file_path):
             quiz_data = json.load(f)
         return quiz_data
     except FileNotFoundError:
-        print("Bot: I couldn't find the `quiz.json` file. Please make sure it's in the same folder as the script.")
+        bot_print("I couldn't find the `quiz.json` file. Please make sure it's in the same folder as the script.")
         return None
     except json.JSONDecodeError:
-        print("Bot: The `quiz.json` file seems to be formatted incorrectly. Please check the file.")
+        bot_print("The `quiz.json` file seems to be formatted incorrectly. Please check the file.")
         return None
 
 def start_quiz(quiz_data):
     """Administers the quiz to the user."""
     score = 0
     total_questions = len(quiz_data)
-    print("\nBot: Great! Let's start the quiz. Please choose the number for the correct answer.")
+    print("", end="\n")
+    bot_print("Great! Let's start the quiz. Please choose the number for the correct answer.")
     print("-" * 50)
 
     for i, (question, details) in enumerate(quiz_data.items()):
@@ -101,21 +112,21 @@ def start_quiz(quiz_data):
                 if 1 <= user_answer_num <= len(options):
                     break
                 else:
-                    print("Bot: Please enter a number from the options provided.")
+                    bot_print("Please enter a number from the options provided.")
             except ValueError:
-                print("Bot: That's not a valid number. Please try again.")
+                bot_print("That's not a valid number. Please try again.")
 
         user_answer_text = options[user_answer_num - 1]
 
         if user_answer_text == correct_answer:
-            print("Bot: That's correct! Well done.")
+            bot_print("That's correct! Well done.")
             score += 1
         else:
-            print(f"Bot: Not quite. The correct answer was: '{correct_answer}'")
+            bot_print(f"Not quite. The correct answer was: '{correct_answer}'")
         print("-" * 20)
 
     print("\n--- Quiz Complete ---")
-    print(f"Bot: You scored {score} out of {total_questions}. Great job!")
+    bot_print(f"You scored {score} out of {total_questions}. Great job!")
     print("-" * 50 + "\n")
 
 # === RAG Chain Initialization ===
@@ -212,9 +223,6 @@ if not rag_chain:
     print("Please check the errors above and restart the script.")
     exit()
 
-# A simple dictionary to store conversation details outside the RAG chain's memory
-session_memory = {"name": None, "symptom_log": []}
-
 training_review_questions = [
     "To start, how confident are you feeling about doing the therapy on your own?",
     "How would you describe your experience with the training you received?",
@@ -240,37 +248,47 @@ while True:
     user_input = input("You: ")
 
     if user_input.lower() in ["exit", "quit", "bye"]:
-        print("Bot: Goodbye! Take care!")
+        bot_print("Goodbye! Take care!")
         break
-    
+
     elif user_input.lower() == 'reload':
-        print("\nBot: Reloading knowledge base... This may take a moment.")
-        rag_chain = create_rag_chain(force_reload=True)
-        if rag_chain:
-            print("Bot: Knowledge base reloaded successfully!")
+        print("\n", end="")
+        bot_print("Reloading knowledge base... This may take a moment.")
+        try:
+            new_chain = create_rag_chain(force_reload=True)
+        except Exception as e:
+            bot_print(f"Failed to reload knowledge base ({e}). I'll keep using the previous version.")
         else:
-            print("Bot: Failed to reload knowledge base. Please check for errors above.")
+            if new_chain:
+                rag_chain = new_chain
+                bot_print("Knowledge base reloaded successfully!")
+            else:
+                bot_print("Failed to reload knowledge base. I'll keep using the previous version.")
         print("-" * 50 + "\n")
         continue
 
     elif any(phrase in user_input.lower() for phrase in ["review my training", "training review"]):
-        print("\nBot: Of course. Let's talk a bit about your training and how you're feeling...")
+        print("\n", end="")
+        bot_print("Of course. Let's talk a bit about your training and how you're feeling...")
         for question in training_review_questions:
-            print(f"Bot: {question}")
+            bot_print(question)
             patient_answer = input("You: ")
-            print("Bot: Thank you for sharing that with me.")
+            bot_print("Thank you for sharing that with me.")
         print("-" * 50)
-        print("Bot: That's really helpful, thank you. Is there anything else I can help with today?\n")
+        bot_print("That's really helpful, thank you. Is there anything else I can help with today?")
+        print()
         continue
 
     elif any(phrase in user_input.lower() for phrase in ["check my knowledge", "knowledge check"]):
-        print("\nBot: Great idea. Let's quickly go over a few key points...")
+        print("\n", end="")
+        bot_print("Great idea. Let's quickly go over a few key points...")
         for question in knowledge_check_questions:
-            print(f"Bot: {question}")
+            bot_print(question)
             patient_answer = input("You: ")
-            print("Bot: Got it, thank you.")
+            bot_print("Got it, thank you.")
         print("-" * 50)
-        print("Bot: Excellent, thank you for confirming those points. Do you have any other questions?\n")
+        bot_print("Excellent, thank you for confirming those points. Do you have any other questions?")
+        print()
         continue
     
     elif "quiz" in user_input.lower():
@@ -286,13 +304,14 @@ while True:
     # Remember the user's name
     if "my name is" in user_input.lower():
         session_memory["name"] = user_input.split("is")[-1].strip().capitalize()
-        print(f"(Noted. I'll remember your name is {session_memory['name']}.)")
+        bot_print(f"Nice to meet you, {session_memory['name']}. I'll remember your name.")
+        continue
 
     # Log potential symptoms
     if any(kw in user_input.lower() for kw in ["pain", "fever", "cloudy", "red", "sore"]):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         session_memory["symptom_log"].append(f"{timestamp} - {user_input}")
-        print("(Symptom logged. Remember to contact your care team if you are concerned.)")
+        bot_print("Symptom logged. Remember to contact your care team if you are concerned.")
 
 
     # --- Main RAG Chain Invocation ---
@@ -302,7 +321,8 @@ while True:
         source_docs = rag_response.get('source_documents', [])
 
         cleaned_reply = re.sub(r' {2,}', ' ', bot_reply)
-        print("\nBot:", cleaned_reply)
+        print("\n", end="")
+        bot_print(cleaned_reply)
 
         if source_docs:
             unique_sources = set()
@@ -316,6 +336,7 @@ while True:
             print(f"\n[Source(s): {', '.join(sorted(list(unique_sources)))}]")
 
     except Exception as e:
-        print("\nBot:", textwrap.fill(f"Sorry, I encountered an error: {e}", width=120))
+        print("\n", end="")
+        bot_print(textwrap.fill(f"Sorry, I encountered an error: {e}", width=120))
 
     print("\n" + "-" * 50 + "\n")
